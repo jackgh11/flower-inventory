@@ -9,6 +9,12 @@ import Bouquets from './pages/Bouquets';
 import Orders from './pages/Orders';
 import StockLog from './pages/StockLog';
 
+/** Temporary Vercel/static deploy: login without backend. Remove when API is wired. */
+const FRONTEND_AUTH_STORAGE_KEY = 'inventory_frontend_auth';
+const FRONTEND_SESSION_TOKEN = '__frontend_session__';
+const FRONTEND_USER = 'jack';
+const FRONTEND_PASS = 'loraghneim';
+
 function Sidebar({ isRTL, toggleLanguage, onLogout }: { isRTL: boolean, toggleLanguage: () => void, onLogout: () => void }) {
   const location = useLocation();
   const menu = [
@@ -72,24 +78,20 @@ function LoginScreen({
   onLogin,
 }: {
   isRTL: boolean;
-  onLogin: (token: string) => void;
+  onLogin: () => void;
 }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setError('');
-    try {
-      const res = await axios.post('/api/auth/login', { username, password });
-      onLogin(res.data.token);
-    } catch {
+    if (username === FRONTEND_USER && password === FRONTEND_PASS) {
+      localStorage.setItem(FRONTEND_AUTH_STORAGE_KEY, '1');
+      onLogin();
+    } else {
       setError(isRTL ? 'بيانات الدخول غير صحيحة' : 'Invalid username or password');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -109,8 +111,8 @@ function LoginScreen({
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </div>
         {error && <p style={{ color: 'var(--color-danger)', marginTop: 0 }}>{error}</p>}
-        <button className="btn" type="submit" disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
-          {loading ? (isRTL ? 'جاري الدخول...' : 'Signing in...') : (isRTL ? 'دخول' : 'Login')}
+        <button className="btn" type="submit" style={{ width: '100%', justifyContent: 'center' }}>
+          {isRTL ? 'دخول' : 'Login'}
         </button>
       </form>
     </div>
@@ -119,11 +121,23 @@ function LoginScreen({
 
 export default function App() {
   const [isRTL, setIsRTL] = useState(false);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('auth_token'));
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window !== 'undefined' && localStorage.getItem(FRONTEND_AUTH_STORAGE_KEY) === '1') {
+      return FRONTEND_SESSION_TOKEN;
+    }
+    return typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  });
   const [authReady, setAuthReady] = useState(false);
   const toggleLanguage = () => setIsRTL(prev => !prev);
 
   useEffect(() => {
+    if (localStorage.getItem(FRONTEND_AUTH_STORAGE_KEY) === '1') {
+      delete axios.defaults.headers.common.Authorization;
+      setToken(FRONTEND_SESSION_TOKEN);
+      setAuthReady(true);
+      return;
+    }
+
     const existing = localStorage.getItem('auth_token');
     if (!existing) {
       delete axios.defaults.headers.common.Authorization;
@@ -141,18 +155,13 @@ export default function App() {
       .finally(() => setAuthReady(true));
   }, []);
 
-  const handleLogin = (newToken: string) => {
-    localStorage.setItem('auth_token', newToken);
-    axios.defaults.headers.common.Authorization = `Bearer ${newToken}`;
-    setToken(newToken);
+  const handleFrontendLogin = () => {
+    delete axios.defaults.headers.common.Authorization;
+    setToken(FRONTEND_SESSION_TOKEN);
   };
 
-  const handleLogout = async () => {
-    try {
-      await axios.post('/api/auth/logout');
-    } catch {
-      // no-op
-    }
+  const handleLogout = () => {
+    localStorage.removeItem(FRONTEND_AUTH_STORAGE_KEY);
     localStorage.removeItem('auth_token');
     delete axios.defaults.headers.common.Authorization;
     setToken(null);
@@ -165,7 +174,7 @@ export default function App() {
       {token ? (
         <Layout isRTL={isRTL} toggleLanguage={toggleLanguage} onLogout={handleLogout} />
       ) : (
-        <LoginScreen isRTL={isRTL} onLogin={handleLogin} />
+        <LoginScreen isRTL={isRTL} onLogin={handleFrontendLogin} />
       )}
     </BrowserRouter>
   );
